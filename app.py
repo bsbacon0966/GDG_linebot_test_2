@@ -11,8 +11,8 @@ load_dotenv()
 line_token = os.getenv("LINE_TOKEN")
 line_secret = os.getenv("LINE_SECRET")
 google_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-default_lat = os.getenv("DEFAULT_LAT", "25.0478")
-default_lng = os.getenv("DEFAULT_LNG", "121.5319")
+default_lat = os.getenv("DEFAULT_LAT", "24.5644")
+default_lng = os.getenv("DEFAULT_LNG", "121.2220")
 
 # Init
 app = Flask(__name__)
