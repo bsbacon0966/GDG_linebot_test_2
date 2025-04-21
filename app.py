@@ -2,58 +2,63 @@ import os
 import requests
 from dotenv import load_dotenv
 from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from linebot.exceptions import InvalidSignatureError
 
-# Load .env
+# v3 SDK
+from linebot.v3.webhook import WebhookHandler
+from linebot.v3.messaging import MessagingApi, Configuration
+from linebot.v3.messaging.models import TextMessage, ReplyMessageRequest
+from linebot.v3.webhook_models import MessageEvent
+from linebot.v3.exceptions import InvalidSignatureError
+
+# ===== 1. Init =====
 load_dotenv()
-line_token = os.getenv("LINE_TOKEN")
-line_secret = os.getenv("LINE_SECRET")
-google_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+channel_token = os.getenv("LINE_TOKEN")
+channel_secret = os.getenv("LINE_SECRET")
+google_key = os.getenv("GOOGLE_MAPS_API_KEY")
 default_lat = os.getenv("DEFAULT_LAT", "24.5644")
 default_lng = os.getenv("DEFAULT_LNG", "121.2220")
 
-# Init
+# Init Flask & LINE
 app = Flask(__name__)
-line_bot_api = LineBotApi(line_token)
-handler = WebhookHandler(line_secret)
+handler = WebhookHandler(channel_secret)
+config = Configuration(access_token=channel_token)
+messaging_api = MessagingApi(configuration=config)
 
-# 關鍵字對應搜尋項目
+# ===== 2. 查詢設定 =====
 query_map = {
     "/想吃甜": "甜點",
     "/想吃鹹": "小吃",
     "/想喝飲料": "飲料"
 }
 
-def search_nearby_places(keyword, lat, lng, radius=800):
+def search_google_places(keyword, lat, lng, radius=1000):
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
     params = {
-        "key": google_api_key,
+        "key": google_key,
         "location": f"{lat},{lng}",
         "radius": radius,
         "keyword": keyword,
         "language": "zh-TW"
     }
-    response = requests.get(url, params=params)
-    results = response.json().get("results", [])
-    return results[:3]  # 只取前三筆
+    res = requests.get(url, params=params)
+    results = res.json().get("results", [])
+    return results[:3]
 
-def format_places_message(places):
+def format_results(places):
     if not places:
-        return "😢 附近找不到合適的地點，換個方向再試試看吧！"
+        return "🥲 附近沒有找到適合的地點，再換個指令試試看吧！"
+    
+    lines = []
+    for p in places:
+        name = p.get("name", "未知店家")
+        address = p.get("vicinity", "未知地址")
+        lat = p["geometry"]["location"]["lat"]
+        lng = p["geometry"]["location"]["lng"]
+        gmap = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+        lines.append(f"📍 {name}\n🏠 {address}\n🔗 {gmap}")
+    return "\n\n".join(lines)
 
-    messages = []
-    for place in places:
-        name = place.get("name", "未知店名")
-        address = place.get("vicinity", "無地址資料")
-        lat = place["geometry"]["location"]["lat"]
-        lng = place["geometry"]["location"]["lng"]
-        map_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
-        messages.append(f"📍 {name}\n🏠 {address}\n🔗 {map_link}")
-
-    return "\n\n".join(messages)
-
+# ===== 3. Webhook入口 =====
 @app.route("/", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature")
@@ -64,19 +69,29 @@ def callback():
         abort(400)
     return "OK"
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    user_input = event.message.text.strip()
-    user_id = event.source.user_id
+# ===== 4. 處理訊息事件 =====
+@handler.add(MessageEvent)
+def handle(event):
+    if not hasattr(event, "message") or event.message.type != "text":
+        return
 
-    if user_input in query_map:
-        keyword = query_map[user_input]
-        places = search_nearby_places(keyword, default_lat, default_lng)
-        message = format_places_message(places)
+    user_text = event.message.text.strip()
+
+    if user_text in query_map:
+        keyword = query_map[user_text]
+        results = search_google_places(keyword, default_lat, default_lng)
+        reply_text = format_results(results)
     else:
-        message = "請輸入 /想吃甜、/想吃鹹 或 /想喝飲料 來尋找附近推薦！"
+        reply_text = "請輸入以下指令試試看 👇\n/想吃甜\n/想吃鹹\n/想喝飲料"
 
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=message))
+    messaging_api.reply_message(
+        ReplyMessageRequest(
+            reply_token=event.reply_token,
+            messages=[TextMessage(text=reply_text)]
+        )
+    )
 
+# ===== 5. 啟動伺服器 =====
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
