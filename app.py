@@ -4,10 +4,8 @@ from dotenv import load_dotenv
 from flask import Flask, request, abort
 
 # v3 SDK
-from linebot.v3.webhook import WebhookHandler
-from linebot.v3.messaging import MessagingApi, Configuration
-from linebot.v3.messaging.models import TextMessage, ReplyMessageRequest
-from linebot.v3.webhook_models import MessageEvent
+from linebot.v3.webhook import WebhookHandler, MessageEvent
+from linebot.v3.messaging import MessagingApi, Configuration, ReplyMessageRequest, TextMessage
 from linebot.v3.exceptions import InvalidSignatureError
 
 # ===== 1. Init =====
@@ -21,8 +19,8 @@ default_lng = os.getenv("DEFAULT_LNG", "121.2220")
 # Init Flask & LINE
 app = Flask(__name__)
 handler = WebhookHandler(channel_secret)
-config = Configuration(access_token=channel_token)
-messaging_api = MessagingApi(configuration=config)
+configuration = Configuration(access_token=channel_token)
+messaging_api = MessagingApi(configuration)
 
 # ===== 2. 查詢設定 =====
 query_map = {
@@ -47,15 +45,15 @@ def search_google_places(keyword, lat, lng, radius=1000):
 def format_results(places):
     if not places:
         return "🥲 附近沒有找到適合的地點，再換個指令試試看吧！"
-    
+
     lines = []
     for p in places:
         name = p.get("name", "未知店家")
         address = p.get("vicinity", "未知地址")
         lat = p["geometry"]["location"]["lat"]
         lng = p["geometry"]["location"]["lng"]
-        gmap = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
-        lines.append(f"📍 {name}\n🏠 {address}\n🔗 {gmap}")
+        gmap_url = f"https://www.google.com/maps?q={lat},{lng}"
+        lines.append(f"📍 {name}\n🏠 {address}\n🔗 {gmap_url}")
     return "\n\n".join(lines)
 
 # ===== 3. Webhook入口 =====
@@ -71,7 +69,7 @@ def callback():
 
 # ===== 4. 處理訊息事件 =====
 @handler.add(MessageEvent)
-def handle(event):
+def handle_message(event):
     if not hasattr(event, "message") or event.message.type != "text":
         return
 
@@ -94,4 +92,3 @@ def handle(event):
 # ===== 5. 啟動伺服器 =====
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
